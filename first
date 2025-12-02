@@ -1,0 +1,229 @@
+using System.Collections.Generic;
+using UnityEngine;
+using Unity.MLAgents;
+using Unity.MLAgents.Sensors;
+using Unity.MLAgents.Actuators;
+
+/// <summary>
+/// Agent that controls an intersection by selecting the next phase index.
+/// Observations:
+///  - for each lane: queue length, occupancy, avarage speed
+///  - current phase 
+///  - time since phase started 
+/// </summary>
+[RequireComponent(typeof(CrossroadController))]
+public class TrafficLightAgent : Agent
+{
+    [Header("References")]
+    public CrossroadController crossroad; 
+
+    [Header("Observation settings")]
+    public int numApproaches = 4; 
+    public int lanesPerApproach = 1; 
+    public int numPhases = 4; 
+
+    [Header("Normalization / scaling")]
+    public float maxQueueForNorm = 20f; 
+    public float maxTimeSincePhase = 60f; 
+
+    [Header("Reward weights")]
+    public float wQueue = 1f;
+    public float wThroughput = 0.2f;
+    public float wSwitch = 0.5f;
+
+    private int lastSelectedPhase = -1;
+
+    public override void Initialize()
+    {
+        if (crossroad == null) crossroad = GetComponent<CrossroadController>();
+    }
+
+    public override void OnEpisodeBegin()
+    {
+        crossroad.ResetIntersection();
+        lastSelectedPhase = -1;
+    }
+
+    public override void CollectObservations(VectorSensor sensor)
+    {
+
+        for (int a = 0; a < numApproaches; a++)
+        {
+            float queue = crossroad.GetQueueLengthForApproach(a); 
+            float occ = crossroad.GetOccupancyForApproach(a);   
+            float avgSpeed = crossroad.GetAverageSpeedForApproach(a); 
+
+            sensor.AddObservation(Mathf.Clamp01(queue / maxQueueForNorm));
+            sensor.AddObservation(Mathf.Clamp01(occ));
+            sensor.AddObservation(Mathf.Clamp01(avgSpeed / crossroad.maxVehicleSpeed));
+        }
+
+        int curPhase = crossroad.GetCurrentPhaseIndex();
+        for (int i = 0; i < numPhases; i++)
+        {
+            sensor.AddObservation(i == curPhase ? 1f : 0f);
+        }
+
+        float timeSincePhase = crossroad.GetTimeSincePhaseStart();
+        sensor.AddObservation(Mathf.Clamp01(timeSincePhase / maxTimeSincePhase));
+    }
+
+    public override void OnActionReceived(ActionBuffers actions)
+    {
+        int phase = actions.DiscreteActions[0];
+        phase = Mathf.Clamp(phase, 0, numPhases - 1);
+
+        bool changed = false;
+        if (phase != crossroad.GetCurrentPhaseIndex())
+        {
+            crossroad.SwitchToPhase(phase);
+            changed = true;
+            lastSelectedPhase = phase;
+        }
+
+        float totalQueue = 0f;
+        float throughput = crossroad.GetAndResetThroughput(); 
+        for (int a = 0; a < numApproaches; a++)
+        {
+            totalQueue += crossroad.GetQueueLengthForApproach(a);
+        }
+
+        float r = -wQueue * totalQueue + wThroughput * throughput;
+        if (changed) r -= wSwitch;
+
+        AddReward(r);
+
+        if (crossroad.IsBlocked())
+        {
+            AddReward(-50f);
+            EndEpisode();
+        }
+    }
+
+    public override void Heuristic(in ActionBuffers actionsOut)
+    {
+        var discrete = actionsOut.DiscreteActions;
+        int bestPhase = 0;
+        float bestQueue = -1f;
+        for (int p = 0; p < numPhases; p++)
+        {
+            float q = crossroad.EstimateQueueForPhase(p);
+            if (q > bestQueue) { bestQueue = q; bestPhase = p; }
+        }
+        discrete[0] = bestPhase;
+    }
+}using System.Collections.Generic;
+using UnityEngine;
+using Unity.MLAgents;
+using Unity.MLAgents.Sensors;
+using Unity.MLAgents.Actuators;
+
+/// <summary>
+/// Agent that controls an intersection by selecting the next phase index.
+/// Observations:
+///  - for each lane: queue length, occupancy, avarage speed
+///  - current phase 
+///  - time since phase started 
+/// </summary>
+[RequireComponent(typeof(CrossroadController))]
+public class TrafficLightAgent : Agent
+{
+    [Header("References")]
+    public CrossroadController crossroad; 
+
+    [Header("Observation settings")]
+    public int numApproaches = 4; 
+    public int lanesPerApproach = 1; 
+    public int numPhases = 4; 
+
+    [Header("Normalization / scaling")]
+    public float maxQueueForNorm = 20f; 
+    public float maxTimeSincePhase = 60f; 
+
+    [Header("Reward weights")]
+    public float wQueue = 1f;
+    public float wThroughput = 0.2f;
+    public float wSwitch = 0.5f;
+
+    private int lastSelectedPhase = -1;
+
+    public override void Initialize()
+    {
+        if (crossroad == null) crossroad = GetComponent<CrossroadController>();
+    }
+
+    public override void OnEpisodeBegin()
+    {
+        crossroad.ResetIntersection();
+        lastSelectedPhase = -1;
+    }
+
+    public override void CollectObservations(VectorSensor sensor)
+    {
+
+        for (int a = 0; a < numApproaches; a++)
+        {
+            float queue = crossroad.GetQueueLengthForApproach(a); 
+            float occ = crossroad.GetOccupancyForApproach(a);   
+            float avgSpeed = crossroad.GetAverageSpeedForApproach(a); 
+
+            sensor.AddObservation(Mathf.Clamp01(queue / maxQueueForNorm));
+            sensor.AddObservation(Mathf.Clamp01(occ));
+            sensor.AddObservation(Mathf.Clamp01(avgSpeed / crossroad.maxVehicleSpeed));
+        }
+
+        int curPhase = crossroad.GetCurrentPhaseIndex();
+        for (int i = 0; i < numPhases; i++)
+        {
+            sensor.AddObservation(i == curPhase ? 1f : 0f);
+        }
+
+        float timeSincePhase = crossroad.GetTimeSincePhaseStart();
+        sensor.AddObservation(Mathf.Clamp01(timeSincePhase / maxTimeSincePhase));
+    }
+
+    public override void OnActionReceived(ActionBuffers actions)
+    {
+        int phase = actions.DiscreteActions[0];
+        phase = Mathf.Clamp(phase, 0, numPhases - 1);
+
+        bool changed = false;
+        if (phase != crossroad.GetCurrentPhaseIndex())
+        {
+            crossroad.SwitchToPhase(phase);
+            changed = true;
+            lastSelectedPhase = phase;
+        }
+
+        float totalQueue = 0f;
+        float throughput = crossroad.GetAndResetThroughput(); 
+        for (int a = 0; a < numApproaches; a++)
+        {
+            totalQueue += crossroad.GetQueueLengthForApproach(a);
+        }
+
+        float r = -wQueue * totalQueue + wThroughput * throughput;
+        if (changed) r -= wSwitch;
+
+        AddReward(r);
+
+        if (crossroad.IsBlocked())
+        {
+            AddReward(-50f);
+            EndEpisode();
+        }
+    }
+
+    public override void Heuristic(in ActionBuffers actionsOut)
+    {
+        var discrete = actionsOut.DiscreteActions;
+        int bestPhase = 0;
+        float bestQueue = -1f;
+        for (int p = 0; p < numPhases; p++)
+        {
+            float q = crossroad.EstimateQueueForPhase(p);
+            if (q > bestQueue) { bestQueue = q; bestPhase = p; }
+        }
+        discrete[0] = bestPhase;
+    }
+}
